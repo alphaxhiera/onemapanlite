@@ -190,3 +190,5 @@ For bare VPS (PM2 + Nginx) and Docker deployment, backups, SSL, environment refe
 - Uploaded files are validated by magic bytes (JPEG/PNG for posters, ZIP signature for Excel imports).
 - Rate limits: 10 requests / 15 min on login, register, change-password; 30 / 15 min on uploads. Set `TRUST_PROXY=1` behind a proxy so limits apply per client IP.
 - Do not expose ports 2025 or 3000 publicly; place Nginx in front and bind them to loopback.
+#   o n e m a p a n l i t e  
+ 
