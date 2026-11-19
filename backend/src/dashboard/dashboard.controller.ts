@@ -9,7 +9,13 @@ router.get(
     authenticateJWT,
     async (req: Request, res: Response) => {
         try {
-        const stats = await getDashboardStats();
+        const token = (req as any).user;
+        const stats = await getDashboardStats({
+            scope: token?.scope,
+            area: token?.area,
+            fotangId: token?.fotang_id,
+            userId: token?.user_info_id ? String(token.user_info_id) : undefined,
+        });
         res.json(stats);
         } catch (error: any) {
         console.error("Dashboard stats error:", error);

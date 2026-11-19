@@ -1,7 +1,40 @@
 import prisma from "../db";
+import { Korwil, Prisma } from "@prisma/client";
 
-export const getDashboardStats = async () => {
+interface DashboardScope {
+    scope?: string;
+    area?: string | null;
+    fotangId?: number | null;
+    userId?: string;
+}
+
+export const getDashboardStats = async ({
+    scope = "self",
+    area,
+    fotangId,
+    userId,
+}: DashboardScope = {}) => {
+    const noMatch = -1;
+    let userWhere: Prisma.UserWhereInput = {};
+    let fotangWhere: Prisma.FotangWhereInput = {};
+    let dcsWhere: Prisma.DianChuanShiWhereInput = {};
+
+    if (scope === "wilayah" && area) {
+        userWhere = { qiudao: { qiu_dao_location: { area: area as Korwil } } };
+        fotangWhere = { area: area as Korwil };
+        dcsWhere = { area: area as Korwil };
+    } else if (scope === "fotang" && fotangId) {
+        userWhere = { qiudao: { qiu_dao_location_id: fotangId } };
+        fotangWhere = { fotang_id: fotangId };
+        dcsWhere = { id: noMatch };
+    } else if (scope !== "nasional") {
+        userWhere = { user_info_id: userId ?? "" };
+        fotangWhere = { fotang_id: noMatch };
+        dcsWhere = { id: noMatch };
+    }
+
     const users = await prisma.user.findMany({
+        where: userWhere,
         include: {
         qiudao: {
             include: {
@@ -26,8 +59,8 @@ export const getDashboardStats = async () => {
         },
     });
 
-    const allFotang = await prisma.fotang.findMany();
-    const allDCS = await prisma.dianChuanShi.findMany();
+    const allFotang = await prisma.fotang.findMany({ where: fotangWhere });
+    const allDCS = await prisma.dianChuanShi.findMany({ where: dcsWhere });
     const totalUmatNasional = users.length;
     const totalQingkouNasional = users.filter(u => u.is_qing_kou).length;
     const totalViharaNasional = allFotang.length;

@@ -2,7 +2,7 @@
 
 Two supported deployment targets:
 
-1. **Bare VPS** – Node.js + PM2 + PostgreSQL + Nginx (no containers).
+1. **Bare VPS** – Node.js + PM2 + SQLite + Nginx (no containers).
 2. **Docker on VPS** – clone the repo from GitHub and build with `docker compose`.
 
 Both targets use the same public routing and the same environment variables.
@@ -18,14 +18,14 @@ Browser ──HTTPS──> Nginx ──┬── /            -> Next.js fronten
                            ├── /api/        -> Express backend   (127.0.0.1:2025)
                            └── /uploads/    -> Express backend   (127.0.0.1:2025)
                                               │
-                                              └──> PostgreSQL
+                                              └──> SQLite file
 ```
 
 | Component  | Location           | Port              | Notes                                        |
 | ---------- | ------------------ | ----------------- | -------------------------------------------- |
 | Frontend   | `frontend/`        | 3000              | Next.js, binds to 127.0.0.1 behind Nginx      |
 | Backend    | `backend/`         | 2025              | Express, `dist/index.js`                      |
-| Database   | Postgres 14+ / 16  | 5432 (loopback only) | Prisma migrations                           |
+| Database   | SQLite file        | –                 | Single file, no database server               |
 | Nginx      | reverse proxy      | 80/443            | Only public entry point                       |
 
 **Why `/api/` path?** The frontend is served from your domain and the API is
@@ -69,8 +69,8 @@ sudo ufw status
 sudo systemctl enable --now fail2ban
 ```
 
-> Never expose ports 2025, 3000 or 5432 publicly. Both targets bind them to
-> `127.0.0.1`; UFW is a second line of defence.
+> Never expose ports 2025 or 3000 publicly. Both targets bind them to
+> `127.0.0.1`; UFW is a second line of defence. SQLite has no network port.
 
 ---
 
@@ -97,22 +97,19 @@ sudo apt install -y build-essential python3
 sudo npm install -g pm2
 ```
 
-## 1.2 Install and configure PostgreSQL
+## 1.2 Database
+
+No database server is needed. The app uses a single SQLite file. Pick a
+persistent location and make sure the service user can write to its directory:
 
 ```bash
-sudo apt install -y postgresql postgresql-contrib
-sudo systemctl enable --now postgresql
-
-sudo -u postgres createuser -s onemapan
-sudo -u postgres createdb -O onemapan onemapan
-sudo -u postgres psql -c "ALTER USER onemapan WITH PASSWORD 'STRONG_PASSWORD';"
+sudo apt install -y sqlite3
+sudo mkdir -p /var/lib/onemapan
+sudo chown $USER:$USER /var/lib/onemapan
 ```
 
-Test the connection:
-
-```bash
-PGPASSWORD='STRONG_PASSWORD' psql -U onemapan -d onemapan -h 127.0.0.1 -c "select 1;"
-```
+`DATABASE_URL` in the next step points to `/var/lib/onemapan/onemapan.db`
+(absolute paths are recommended on bare VPS).
 
 ## 1.3 Clone the application
 
@@ -137,7 +134,7 @@ Edit `.env`:
 NODE_ENV=production
 HOST=127.0.0.1
 PORT=2025
-DATABASE_URL="postgresql://onemapan:STRONG_PASSWORD@127.0.0.1:5432/onemapan"
+DATABASE_URL="file:/var/lib/onemapan/onemapan.db"
 
 # Required, minimum 32 characters. Never reuse an old/weak value.
 # Generate with: openssl rand -hex 48
@@ -160,6 +157,7 @@ cd /opt/onemapan/backend
 npm ci                 # reproducible install from package-lock.json
 npx prisma generate
 npx prisma migrate deploy
+npm run seed           # one-time: provinces/cities/districts/localities/viharas, pandita, roles
 npm run build          # emits backend/dist/index.js
 test -f dist/index.js && echo "build ok"
 ```
@@ -235,8 +233,7 @@ Create `/etc/systemd/system/onemapan.service`:
 ```ini
 [Unit]
 Description=OneMapan API
-After=network.target postgresql.service
-Wants=postgresql.service
+After=network.target
 
 [Service]
 Type=simple
@@ -397,10 +394,7 @@ $EDITOR .env
 Minimum required values:
 
 ```dotenv
-POSTGRES_USER=onemapan
-POSTGRES_PASSWORD=STRONG_DATABASE_PASSWORD
-POSTGRES_DB=onemapan
-
+# No database credentials needed: the SQLite file lives in the db_data volume.
 JWT_SECRET=openssl-rand-hex-48-output-at-least-32-characters
 JWT_EXPIRES_IN=1d
 
@@ -431,7 +425,7 @@ Persistent data:
 
 | Volume            | Mounted at                | Purpose                          |
 | ----------------- | ------------------------- | -------------------------------- |
-| `onemapan_db_data` | `/var/lib/postgresql/data` | Database                         |
+| `onemapan_db_data` | `/app/data`               | SQLite file (`onemapan.db`)      |
 | `onemapan_uploads` | `/app/public/uploads`      | Uploaded posters/images          |
 
 > Check exact names with `docker volume ls` (prefixed by the directory name).
@@ -444,7 +438,6 @@ Persistent data:
 ports:
   - "127.0.0.1:2025:2025"   # backend
   - "127.0.0.1:3000:3000"   # frontend
-  - "127.0.0.1:5432:5432"   # postgres (local admin tools only)
 ```
 
 Only Nginx (80/443) is reachable from the internet. Use the **same Nginx
@@ -480,10 +473,19 @@ Migrations already run automatically at container start. To run them by hand:
 docker compose run --rm backend npx prisma migrate deploy
 ```
 
-### Database shell
+### Seed reference data (fresh install only)
 
 ```bash
-docker compose exec db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+docker compose exec backend npm run seed
+```
+
+The seed is idempotent and imports the CSV files in `backend/data/` plus the
+default roles. It skips reference data if provinces are already present.
+
+### Database file
+
+```bash
+docker compose exec backend ls -l /app/data/onemapan.db
 ```
 
 ## 2.8 Update a Docker deployment
@@ -528,9 +530,10 @@ TS=$(date +%Y%m%d_%H%M%S)
 DEST=/var/backups/onemapan
 mkdir -p "$DEST"
 
-# Database dump (runs inside the db container)
-docker compose exec -T db sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
-  | gzip > "$DEST/db_$TS.sql.gz"
+# SQLite database (online backup, safe while the API is running)
+DBVOL=$(docker volume ls -q | grep '_db_data$' | head -n1)
+docker run --rm -v "$DBVOL":/data -v "$DEST":/backup alpine \
+  sh -c "apk add --no-cache sqlite >/dev/null && sqlite3 /data/onemapan.db '.backup /backup/db_$TS.db' && gzip /backup/db_$TS.db"
 
 # Uploaded images (named volume)
 VOLUME=$(docker volume ls -q | grep '_uploads$' | head -n1)
@@ -539,7 +542,7 @@ if [ -n "$VOLUME" ]; then
     tar czf "/backup/uploads_$TS.tgz" -C /data .
 fi
 
-find "$DEST" -name 'db_*.sql.gz' -mtime +30 -delete
+find "$DEST" -name 'db_*.db.gz' -mtime +30 -delete
 find "$DEST" -name 'uploads_*.tgz' -mtime +30 -delete
 EOF
 
@@ -547,18 +550,26 @@ sudo chmod +x /usr/local/bin/backup_onemapan.sh
 echo "0 2 * * * root /usr/local/bin/backup_onemapan.sh >> /var/log/onemapan-backup.log 2>&1" | sudo tee /etc/cron.d/onemapan-backup
 ```
 
-**Bare-VPS equivalent** (host `pg_dump` instead of a container):
+**Bare-VPS equivalent** (`sqlite3` CLI, install with `apt install sqlite3`):
 
 ```bash
-# peer authentication as the postgres OS user – no password needed
-sudo -u postgres pg_dump onemapan | gzip > /var/backups/onemapan/db_$(date +%F).sql.gz
+sudo sqlite3 /var/lib/onemapan/onemapan.db ".backup /var/backups/onemapan/db_$(date +%F).db"
+sudo gzip -f /var/backups/onemapan/db_$(date +%F).db
 tar czf /var/backups/onemapan/uploads_$(date +%F).tgz -C /opt/onemapan/backend/public uploads
 ```
 
 Test a restore before you rely on the backups:
 
 ```bash
-gunzip -c db_YYYYMMDD.sql.gz | docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+# Bare VPS: stop the API, replace the file, then start it again
+gunzip -c db_YYYYMMDD.db.gz | sudo tee /var/lib/onemapan/onemapan.db >/dev/null
+sudo chown $USER:$USER /var/lib/onemapan/onemapan.db
+
+# Docker: stop the backend, copy the file into the db_data volume, restart
+gunzip -c db_YYYYMMDD.db.gz > /tmp/onemapan.db
+DBVOL=$(docker volume ls -q | grep '_db_data$' | head -n1)
+docker run --rm -v "$DBVOL":/data -v /tmp:/backup alpine cp /backup/onemapan.db /data/onemapan.db
+docker compose up -d backend
 ```
 
 ---
@@ -570,7 +581,7 @@ gunzip -c db_YYYYMMDD.sql.gz | docker compose exec -T db sh -c 'psql -U "$POSTGR
 | `NODE_ENV`             | yes      | `development`       | Set `production` on servers                                        |
 | `PORT`                 | no       | `2025`              | API port                                                           |
 | `HOST`                 | no       | `0.0.0.0`           | API bind address. Use `127.0.0.1` behind Nginx (bare VPS)           |
-| `DATABASE_URL`         | yes      | –                   | Prisma/Postgres connection string                                  |
+| `DATABASE_URL`         | yes      | –                   | SQLite file URL (`file:/app/data/onemapan.db` in Docker, absolute path on bare VPS) |
 | `JWT_SECRET`           | yes      | –                   | **Minimum 32 chars**; app refuses to start otherwise               |
 | `JWT_EXPIRES_IN`       | no       | `1d`                | Token lifetime                                                     |
 | `SERVER_BASE_URL`      | yes      | –                   | Public API base URL (no trailing slash) used for `/uploads/...`     |
@@ -586,7 +597,7 @@ gunzip -c db_YYYYMMDD.sql.gz | docker compose exec -T db sh -c 'psql -U "$POSTGR
 - [ ] `JWT_SECRET` is random, ≥ 32 chars, and stored only in `.env` (`chmod 600`)
 - [ ] `.env` is git-ignored (it is) — never committed to GitHub
 - [ ] UFW allows only SSH/80/443
-- [ ] PostgreSQL bound to loopback / container network, never public
+- [ ] SQLite file directory is writable only by the service user and is backed up (no database port is exposed)
 - [ ] Nginx `client_max_body_size` set (20 MB) so imports are not rejected
 - [ ] `TRUST_PROXY=1` so per-IP rate limits (login 10/15 min) work correctly
 - [ ] TLS enabled with auto-renewal (`certbot renew --dry-run`)
@@ -637,14 +648,11 @@ Create it from `.env.example`, or (Docker) from the repo-root `.env`.
 ### Backend exits: "JWT_SECRET must be at least 32 characters"
 Generate a strong secret: `openssl rand -hex 48`.
 
-### `Can't reach database server at localhost:5432`
-- Bare VPS: `sudo systemctl status postgresql`, check `DATABASE_URL` host/user/password.
-- Docker: `docker compose ps` (db must be `healthy`), the host must be `db`, not `localhost`.
-
-### `P1000` authentication failed → wrong `POSTGRES_PASSWORD`
-The password inside an existing `db_data` volume does not change when you edit
-`.env`. Either fix the password to match the existing data or (destructive)
-`docker compose down -v && docker compose up -d --build`.
+### `P1000` / "unable to open database file"
+- Bare VPS: check that `DATABASE_URL` points to an absolute path, the parent
+  directory exists and is writable by the service user.
+- Docker: check that the `db_data` volume is mounted at `/app/data` and the URL
+  is `file:/app/data/onemapan.db` (relative paths resolve next to the schema).
 
 ### API answers `403` CORS / browser blocks the call
 `ALLOWED_ORIGINS` must contain the exact frontend origin, including scheme.
@@ -673,7 +681,7 @@ Do **not** use `migrate reset` in production — it drops all data.
 
 ### Port already in use
 ```bash
-sudo ss -ltnp | grep -E ':(2025|3000|5432)'
+sudo ss -ltnp | grep -E ':(2025|3000)'
 # Docker: docker compose down
 # Bare VPS: pm2 delete onemapan-api
 ```
@@ -696,7 +704,7 @@ cd /opt/onemapan
 git log --oneline -5
 git checkout <previous-commit>
 docker compose up -d --build
-# database: restore from a backup dump if a migration must be reverted
+# database: restore the SQLite file from a backup if a migration must be reverted
 ```
 
 **Bare VPS**
@@ -727,10 +735,10 @@ prefer *forward* migrations (fix + redeploy) over reverting schema changes.
 
 - [ ] Server updated, UFW + fail2ban enabled
 - [ ] Node 20 (Target 1) or Docker (Target 2) installed
-- [ ] PostgreSQL up, database/user/password created
+- [ ] SQLite data directory created and writable
 - [ ] Repo cloned from GitHub
 - [ ] `.env` configured with strong secrets (`chmod 600`)
-- [ ] Prisma client generated, migrations applied
+- [ ] Prisma client generated, migrations applied, reference data seeded once
 - [ ] Backend + frontend built successfully
 - [ ] API health check returns `200` on `/healthz`
 - [ ] Processes survive a reboot (`pm2 startup` / `restart: unless-stopped`)
@@ -809,7 +817,7 @@ unmaintained upstream — consider replacing it later).
 
 | File | Purpose |
 | ---- | ------- |
-| `docker-compose.yml` | Docker target: Postgres 16 + backend + frontend, fixed project name `onemapan`, loopback-only ports, healthchecks, named volumes for DB and uploads |
+| `docker-compose.yml` | Docker target: backend + frontend, fixed project name `onemapan`, loopback-only ports, healthchecks, named volumes for the SQLite file and uploads |
 | `backend/Dockerfile` | Multi-stage: `npm ci` → `prisma generate` → `tsc` → prune dev deps → runtime runs `prisma migrate deploy && node dist/index.js` as non-root user |
 | `frontend/Dockerfile` | Multi-stage: `npm ci` → `next build` with `NEXT_PUBLIC_API_URL` arg → `next start` as non-root user |
 | `backend/.dockerignore`, `frontend/.dockerignore` | Keep `node_modules`, `.env`, build output out of the build context |
@@ -822,7 +830,7 @@ unmaintained upstream — consider replacing it later).
 | -------- | ------ | ----- |
 | `JWT_SECRET` | **required** (was optional w/ weak fallback) | min 32 chars, fail-fast |
 | `SERVER_BASE_URL` | **required** | public API base URL used for `/uploads/...` links |
-| `DATABASE_URL` | required (unchanged) | |
+| `DATABASE_URL` | **changed** | SQLite file URL instead of a Postgres connection string |
 | `HOST` | new, optional | bind address; `127.0.0.1` behind Nginx |
 | `TRUST_PROXY` | new | `1` when behind Nginx so rate limiting keys on real client IPs |
 | `ALLOWED_ORIGINS` | new | comma-separated CORS allow-list |
@@ -843,6 +851,11 @@ See section 3 for the full reference and `.env.example` files for templates.
 - Rate limits apply: 10 requests / 15 min per IP on login, register and
   change-password; 30 / 15 min on uploads. Set `TRUST_PROXY=1` behind Nginx
   or all users share one bucket (see troubleshooting in section 6).
+- **Database switched from PostgreSQL to SQLite**: no database server or
+  credentials; `DATABASE_URL` is now a file URL. The Prisma migration history
+  was reset to one fresh baseline, so an old PostgreSQL data directory cannot
+  be reused. Seed reference data once with `npm run seed`. Run only one backend
+  instance per database file (SQLite is single-writer).
 
 ### 10.8 Validation performed
 

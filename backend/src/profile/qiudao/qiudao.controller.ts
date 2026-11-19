@@ -64,11 +64,6 @@ router.get(
         }
       }
 
-      const queryScope = req.query.scope as string;
-      if (queryScope && ["self", "fotang", "wilayah", "nasional"].includes(queryScope)) {
-        effectiveScope = queryScope;
-      }
-
       const fetchOptions = {
         page,
         limit,
@@ -151,11 +146,23 @@ router.get(
   }
 );
 
-const checkFotangAccess = async (req: AuthRequest, qiudaoId?: string) => {
-  if (req.user?.role !== "Admin Vihara") return true;
+const ownsQiudaoForSelfScope = async (req: AuthRequest, qiudaoId: string): Promise<boolean> => {
+  if (req.userScope !== "self") return true;
 
   const currentUser = await prisma.user.findUnique({
-    where: { user_info_id: String(req.user.user_info_id) },
+    where: { user_info_id: String(req.user?.user_info_id) },
+    select: { qiu_dao_id: true },
+  });
+
+  return currentUser?.qiu_dao_id === qiudaoId;
+};
+
+const checkFotangAccess = async (req: AuthRequest, qiudaoId?: string) => {
+  const normalizedRole = (req.user?.role || "").toLowerCase().replace(/[\s_]+/g, "");
+  if (normalizedRole !== "adminvihara") return true;
+
+  const currentUser = await prisma.user.findUnique({
+    where: { user_info_id: String(req.user?.user_info_id) },
     include: { qiudao: { select: { qiu_dao_location_id: true } } },
   });
 
@@ -231,6 +238,52 @@ router.patch(
         return;
       }
 
+      if (!(await ownsQiudaoForSelfScope(req, id))) {
+        res.status(403).json({ message: "Forbidden: Bukan QiuDao Anda" });
+        return;
+      }
+
+      const targetLocationId =
+        req.body.qiu_dao_location_id !== undefined
+          ? Number(req.body.qiu_dao_location_id)
+          : undefined;
+
+      if (targetLocationId !== undefined) {
+        if (!Number.isInteger(targetLocationId) || targetLocationId <= 0) {
+          res.status(400).json({ message: "Lokasi qiudao tidak valid" });
+          return;
+        }
+
+        if (targetLocationId !== qiudao.qiu_dao_location_id && req.userScope !== "nasional") {
+          if (req.userScope === "self") {
+            res.status(403).json({ message: "Forbidden: Tidak boleh memindahkan QiuDao" });
+            return;
+          }
+
+          if (req.userScope === "wilayah") {
+            const targetFotang = await prisma.fotang.findUnique({
+              where: { fotang_id: targetLocationId },
+              select: { area: true },
+            });
+            if (!targetFotang || targetFotang.area !== req.userArea) {
+              res.status(403).json({ message: "Forbidden: Lokasi tujuan di luar wilayah Anda" });
+              return;
+            }
+          }
+
+          if (req.userScope === "fotang") {
+            const currentUser = await prisma.user.findUnique({
+              where: { user_info_id: String(req.user?.user_info_id) },
+              select: { qiudao: { select: { qiu_dao_location_id: true } } },
+            });
+            if (currentUser?.qiudao?.qiu_dao_location_id !== targetLocationId) {
+              res.status(403).json({ message: "Forbidden: Lokasi tujuan bukan vihara Anda" });
+              return;
+            }
+          }
+        }
+      }
+
       const updated = await updateQiuDaoById(id, req.body);
       res.status(200).json({ message: "Berhasil diperbarui", data: updated });
     } catch (error: any) {
@@ -256,6 +309,11 @@ router.delete(
 
       if (req.userScope === "wilayah" && qiudao.qiu_dao_location?.area !== req.userArea) {
         res.status(403).json({ message: "Forbidden: Wilayah berbeda" });
+        return;
+      }
+
+      if (!(await ownsQiudaoForSelfScope(req, id))) {
+        res.status(403).json({ message: "Forbidden: Bukan QiuDao Anda" });
         return;
       }
 

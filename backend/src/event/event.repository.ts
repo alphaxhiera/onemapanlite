@@ -154,21 +154,33 @@ export const getEventsFiltered = async ({
   }
 
   if (startDate || endDate) {
-    const start = startDate ? new Date(startDate) : undefined;
-    const end = endDate ? new Date(endDate) : undefined;
+    // Dates coming from the UI are calendar days in WIB (UTC+7). Parsing a bare
+    // "YYYY-MM-DD" uses UTC, which shifts the window by 7 hours, so build the
+    // boundaries explicitly in WIB.
+    const parseBoundary = (value: string, endOfDay: boolean): Date => {
+      const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(value);
+      const iso = dateOnly
+        ? `${value}T${endOfDay ? "23:59:59.999" : "00:00:00.000"}+07:00`
+        : value;
+      const parsed = new Date(iso);
+      if (isNaN(parsed.getTime())) {
+        throw new Error(`Invalid ${endOfDay ? "endDate" : "startDate"} format`);
+      }
+      return parsed;
+    };
 
-    if (start && isNaN(start.getTime())) throw new Error("Invalid startDate format");
-    if (end && isNaN(end.getTime())) throw new Error("Invalid endDate format");
+    const start = startDate ? parseBoundary(startDate, false) : undefined;
+    const end = endDate ? parseBoundary(endDate, true) : undefined;
 
-    if (end) {
-      end.setHours(23, 59, 59, 999);
+    if (start && end && start > end) {
+      throw new Error("startDate tidak boleh setelah endDate");
     }
 
     where.occurrences = {
       some: {
         greg_occur_date: {
-          ...(startDate && { gte: new Date(startDate) }),
-          ...(endDate && { lte: new Date(endDate) }),
+          ...(start && { gte: start }),
+          ...(end && { lte: end }),
         },
       },
     };
@@ -296,6 +308,7 @@ export const updateEvent = async (
 
     const updateData: Prisma.EventUpdateInput = {};
 
+    if (data.category) updateData.category = data.category;
     if (data.event_type) updateData.event_type = data.event_type;
     if (data.event_name) updateData.event_name = data.event_name;
     if (data.event_mandarin_name !== undefined) updateData.event_mandarin_name = data.event_mandarin_name;
@@ -310,23 +323,23 @@ export const updateEvent = async (
         updateData.eventLocation = { disconnect: true };
       } else {
         if (!data.cityId || !data.location_name || !data.area) throw new Error("cityId, location_name, area required");
-        const el = await tx.eventLocation.upsert({
-          where: { event_location_id: data.eventLocationId ?? -1 },
-          update: {
-            location_name: data.location_name,
-            cityId: data.cityId,
-            street: data.street ?? null,
-            postal_code: data.postal_code ?? null,
-            area: data.area,
-          },
-          create: {
-            location_name: data.location_name,
-            cityId: data.cityId,
-            street: data.street ?? null,
-            postal_code: data.postal_code ?? null,
-            area: data.area,
-          },
-        });
+        const locationPayload = {
+          location_name: data.location_name,
+          cityId: data.cityId,
+          street: data.street ?? null,
+          postal_code: data.postal_code ?? null,
+          area: data.area,
+        };
+        // Only reuse the location that is actually attached to this event.
+        // Trusting an arbitrary client-supplied id would let a user overwrite
+        // another event's location row.
+        const reusableId =
+          data.eventLocationId && event.eventLocationId === data.eventLocationId
+            ? data.eventLocationId
+            : undefined;
+        const el = reusableId
+          ? await tx.eventLocation.update({ where: { event_location_id: reusableId }, data: locationPayload })
+          : await tx.eventLocation.create({ data: locationPayload });
         updateData.eventLocation = { connect: { event_location_id: el.event_location_id } };
         updateData.fotang = { disconnect: true };
       }

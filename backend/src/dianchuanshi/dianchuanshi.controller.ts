@@ -8,6 +8,7 @@ import {
 } from "./dianchuanshi.service";
 import { Prisma } from "@prisma/client";
 import { authenticateJWT } from "../middleware/authentication";
+import { requireNationalAccess } from "../middleware/require-national";
 import { sendError, sendBadRequest } from "../utils/respond";
 
 const router = Router();
@@ -33,7 +34,7 @@ router.get("/:id", async (req: Request, res: Response) => {
     }
 });
 
-router.post("/", async (req: Request, res: Response) => {
+router.post("/", requireNationalAccess, async (req: Request, res: Response) => {
     try {
         const newPandita = await createDianChuanShiService(req.body as Prisma.DianChuanShiCreateInput);
         res.status(201).json({ message: "Pandita berhasil ditambahkan", data: newPandita });
@@ -42,7 +43,7 @@ router.post("/", async (req: Request, res: Response) => {
     }
 });
 
-router.patch("/:id", async (req: Request, res: Response) => {
+router.patch("/:id", requireNationalAccess, async (req: Request, res: Response) => {
     try {
         const id = parseInt(req.params.id);
         const updated = await updateDianChuanShiService(id, req.body as Prisma.DianChuanShiUpdateInput);
@@ -52,7 +53,7 @@ router.patch("/:id", async (req: Request, res: Response) => {
     }
 });
 
-router.delete("/:id", async (req: Request, res: Response) => {
+router.delete("/:id", requireNationalAccess, async (req: Request, res: Response) => {
     try {
         const id = parseInt(req.params.id);
         const result = await deleteDianChuanShiService(id);

@@ -12,6 +12,7 @@ export const useCreateEvent = () => {
     return useMutation({
         mutationFn: createEvent,
         onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: ["events-final-v3"] });
         queryClient.invalidateQueries({ queryKey: ["fetch.events"] });
         },
         onError: (error) => {

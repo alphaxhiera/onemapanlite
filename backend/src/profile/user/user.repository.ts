@@ -79,7 +79,7 @@ export const findUserById = async (id: string): Promise<UserWithIncludes | null>
       qiudao: { include: { qiu_dao_location: true } },
       id_card_location: { include: { locality: { include: { district: { include: { city: { include: { province: true } } } } } } } },
       domicile_location: { include: { locality: { include: { district: { include: { city: { include: { province: true } } } } } } } },
-      userCredential: true,
+      userCredential: { select: { user_credential: true, username: true } },
       spiritualUser: true,
       userRoles: { include: { role: true } },
     },
@@ -149,8 +149,22 @@ export const updateUserWithSpiritualStatus = async (
     const updatedUser = await tx.user.update({
       where: { user_info_id: id },
       data: {
-        ...updateData,
+        full_name: updateData.full_name,
+        mandarin_name: updateData.mandarin_name,
+        is_qing_kou: updateData.is_qing_kou,
+        phone_number: updateData.phone_number,
+        gender: updateData.gender,
         blood_type: safeBloodType,
+        place_of_birth: updateData.place_of_birth,
+        date_of_birth: updateData.date_of_birth,
+        id_card_number: updateData.id_card_number,
+        email: updateData.email,
+        marital_status: updateData.marital_status,
+        last_education_level: updateData.last_education_level,
+        education_major: updateData.education_major,
+        job_name: updateData.job_name,
+        id_card_location: updateData.id_card_location,
+        domicile_location: updateData.domicile_location,
       },
     });
 
@@ -204,7 +218,6 @@ function buildLocationFilter(
 ): Prisma.UserWhereInput {
   const base = {
     contains: search,
-    mode: "insensitive" as const,
   };
 
   if (level === "locality") {
@@ -314,7 +327,6 @@ export const getUsersPaginated = async ({
     where = {
       [field]: {
         contains: search,
-        mode: "insensitive",
       },
     };
   }
@@ -354,7 +366,11 @@ export const getUsersPaginated = async ({
   }
   if (is_qing_kou) {
     if (Array.isArray(is_qing_kou) && is_qing_kou.length > 0) {
-      combinedFilter.is_qing_kou = { equals: is_qing_kou[0] === "true" };
+      const values = Array.from(new Set(is_qing_kou.map(val => String(val) === "true")));
+      // Selecting both values is the same as not filtering at all.
+      if (values.length === 1) {
+        combinedFilter.is_qing_kou = { equals: values[0] };
+      }
     } else if (typeof is_qing_kou === "string" && is_qing_kou.trim() !== "") {
       combinedFilter.is_qing_kou = { equals: is_qing_kou === "true" };
     }
@@ -417,7 +433,7 @@ export const getUsersPaginated = async ({
         qiudao: { include: { qiu_dao_location: true } },
         id_card_location: { include: locationInclude },
         domicile_location: { include: locationInclude },
-        userCredential: true,
+        userCredential: { select: { user_credential: true, username: true } },
         spiritualUser: true,
       },
     }),

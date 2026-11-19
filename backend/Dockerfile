@@ -44,12 +44,14 @@ COPY --from=deps --chown=onemapan:onemapan /app/dist ./dist
 COPY --from=deps --chown=onemapan:onemapan /app/package.json ./package.json
 
 # Schema + migrations are needed at runtime to apply pending migrations.
+# data/ contains the CSV reference files used by `npm run seed`.
 COPY --chown=onemapan:onemapan prisma ./prisma
+COPY --chown=onemapan:onemapan data ./data
 
 # Uploaded posters/images. Mount a named volume on /app/public/uploads in
 # production so files survive container restarts.
-RUN mkdir -p /app/public/uploads \
-    && chown -R onemapan:onemapan /app/public
+RUN mkdir -p /app/public/uploads /app/data \
+    && chown -R onemapan:onemapan /app/public /app/data
 
 USER onemapan
 EXPOSE 2025

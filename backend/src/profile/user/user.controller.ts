@@ -174,13 +174,13 @@ router.get(
   async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
     try {
       const id = req.params.id;
-      const currentUserId = String(req.user!.user_info_id);;
+      const currentUserId = String(req.user!.user_info_id);
 
-      if (req.userScope === "self" && req.user!.role !== "user") {
-        if (id !== currentUserId) {
-          res.status(403).json({ message: "Forbidden: Can only view own data" });
-          return;
-        }
+      // Every self-scoped user (including the plain "User" role) may only read
+      // their own record.
+      if (req.userScope === "self" && id !== currentUserId) {
+        res.status(403).json({ message: "Forbidden: Can only view own data" });
+        return;
       }
 
       const user = await getUserById(id) as UserWithRelations | null;
@@ -212,7 +212,12 @@ router.patch(
   async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
     try {
       const userId = req.params.id;
-      const currentUserId = String(req.user!.user_info_id);;
+      const currentUserId = String(req.user!.user_info_id);
+
+      if (req.userScope === "self" && userId !== currentUserId) {
+        res.status(403).json({ message: "Forbidden: Hanya dapat mengubah profil sendiri" });
+        return;
+      }
 
       if (userId === currentUserId) {
         const updatedUser = await updateUserById(userId, req.body);
@@ -256,6 +261,12 @@ router.delete(
   async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
     try {
       const userId = req.params.id;
+
+      if (req.userScope === "self" && userId !== String(req.user!.user_info_id)) {
+        res.status(403).json({ message: "Forbidden: Hanya dapat menghapus akun sendiri" });
+        return;
+      }
+
       const user = await getUserById(userId) as UserWithRelations | null;
 
       if (!user) {

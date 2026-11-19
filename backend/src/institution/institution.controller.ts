@@ -7,6 +7,7 @@ import {
 } from "./institution.service";
 import { Prisma } from "@prisma/client";
 import { authenticateJWT } from "../middleware/authentication";
+import { requireNationalAccess } from "../middleware/require-national";
 import { sendError, sendBadRequest } from "../utils/respond";
 
 const router = Router();
@@ -22,7 +23,7 @@ router.get("/", async (_req: Request, res: Response) => {
     }
 });
 
-router.post("/", async (req: Request, res: Response) => {
+router.post("/", requireNationalAccess, async (req: Request, res: Response) => {
     try {
         const newInst = await createInstitution(req.body as Prisma.InstitutionCreateInput);
         res.status(201).json(newInst);
@@ -31,7 +32,7 @@ router.post("/", async (req: Request, res: Response) => {
     }
 });
 
-router.patch("/:id", async (req: Request, res: Response) => {
+router.patch("/:id", requireNationalAccess, async (req: Request, res: Response) => {
     try {
         const id = parseInt(req.params.id);
         const updated = await updateInstitution(id, req.body as Prisma.InstitutionUpdateInput);
@@ -41,7 +42,7 @@ router.patch("/:id", async (req: Request, res: Response) => {
     }
 });
 
-router.delete("/:id", async (req: Request, res: Response) => {
+router.delete("/:id", requireNationalAccess, async (req: Request, res: Response) => {
     try {
         const id = parseInt(req.params.id);
         await deleteInstitution(id);

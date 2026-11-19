@@ -102,7 +102,7 @@ export default function ReportBuilder() {
       const fotang = Array.isArray(fotangRes.data) ? fotangRes.data : fotangRes.data.data || [];
       const dcsList = Array.isArray(dcsRes.data) ? dcsRes.data : dcsRes.data.data || [];
 
-      const dcsMap = Object.fromEntries(dcsList.map(d => [d.dian_chuan_shi_id, d]));
+      const dcsMap = Object.fromEntries(dcsList.map(d => [d.id, d]));
 
       const joined = users.map(user => {
         const qd = qiudao.find(q => q.qiu_dao_id === user.qiu_dao_id);
@@ -130,7 +130,7 @@ export default function ReportBuilder() {
           lunar_month: qd?.lunar_month,
           lunar_day: qd?.lunar_day,
           shi_chen_time: qd?.lunar_shi_chen_time,
-          dcs_full_name: dcs.full_name,
+          dcs_full_name: dcs.name,
           dcs_mandarin_name: dcs.mandarin_name,
           fotang_name: ft?.location_name,
         };
@@ -352,7 +352,16 @@ export default function ReportBuilder() {
     } 
     else if (exportFormat === "csv") {
       const totalRow = [totalText, ...Array(headers.length - 1).fill("")];
-      const csv = [headers, ...rows, totalRow].map(r => r.join(",")).join("\n");
+      // Quote every cell and neutralize leading formula characters so a value
+      // such as `=HYPERLINK(...)` typed into a name field cannot execute.
+      const csvCell = (value) => {
+        let str = value == null ? "" : String(value);
+        if (/^[=+\-@\t\r]/.test(str)) str = `'${str}`;
+        return `"${str.replace(/"/g, '""')}"`;
+      };
+      const csv = [headers, ...rows, totalRow]
+        .map(r => r.map(csvCell).join(","))
+        .join("\n");
       const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
       saveAs(blob, `${filename}.csv`);
     }
@@ -360,12 +369,12 @@ export default function ReportBuilder() {
 
   const handleExport = () => {
     const headers = selectedFields.map(k => ALL_FIELDS.find(f => f.key === k).label);
-    const rows = filteredData.slice(0, 1000).map(d => {
+    const rows = filteredData.map(d => {
       return selectedFields.map(key => {
         let val = d[key];
         if (key === "gender") val = d.gender === "Male" ? "Pria" : "Wanita";
         if (key === "is_qing_kou") val = val ? "Ya" : "Tidak";
-        if (key === "date_of_birth") val = val ? new Date(val).toLocaleDateString("id-ID") : "-";
+        if (key === "date_of_birth") val = val ? new Date(val).toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta" }) : "-";
         if (key === "area") val = d.area ? `Wilayah ${d.area.replace("Korwil_", "")}` : "-";
         return val ?? "-";
       });

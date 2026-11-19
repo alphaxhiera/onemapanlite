@@ -18,15 +18,23 @@ export const toWIBLocalString = (isoString) => {
 
 export const fromLocalToWIBISO = (localString) => {
     if (!localString) return null;
-    
+
     try {
-        const date = new Date(localString);
-        
-        const wibDate = new Date(date.toLocaleString('en-US', { 
-        timeZone: WIB_TIMEZONE 
-        }));
-        
-        return wibDate.toISOString();
+        // `datetime-local` values carry no timezone. Interpret them as WIB wall
+        // time explicitly; converting via toLocaleString used the *browser*
+        // timezone and shifted the instant for users outside UTC+7.
+        const match = /^(\d{4}-\d{2}-\d{2})(?:[T ](\d{2}:\d{2})(?::(\d{2}))?)?$/.exec(
+            String(localString).trim()
+        );
+
+        const iso = match
+            ? `${match[1]}T${match[2] || "00:00"}:${match[3] || "00"}+07:00`
+            : localString;
+
+        const date = new Date(iso);
+        if (isNaN(date.getTime())) return null;
+
+        return date.toISOString();
     } catch (error) {
         console.error('Error converting local to WIB ISO:', error);
         return null;

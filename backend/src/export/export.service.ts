@@ -18,7 +18,11 @@ function formatLocation(location?: any): string {
 
 function formatDateOnly(date?: Date | string | null): string {
   if (!date) return "";
-  return new Date(date).toISOString().split("T")[0];
+  const parsed = new Date(date);
+  if (isNaN(parsed.getTime())) return "";
+  // Birth dates are stored as WIB wall-clock dates; toISOString() would shift
+  // midnight WIB back to the previous day (UTC).
+  return parsed.toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
 }
 
 export const generateQiudaoExcel = async (): Promise<Buffer> => {

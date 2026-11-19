@@ -9,29 +9,29 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
 model User {
-  user_info_id         String          @id @db.VarChar(16)
-  qiu_dao_id           String          @unique @db.VarChar(16)
+  user_info_id         String          @id
+  qiu_dao_id           String          @unique
   qiudao               QiuDao          @relation(fields: [qiu_dao_id], references: [qiu_dao_id])
-  full_name            String          @db.VarChar(250)
-  mandarin_name        String?         @db.VarChar(4)
+  full_name            String
+  mandarin_name        String?
   is_qing_kou          Boolean
   gender               Gender
   blood_type           BloodType?
-  place_of_birth       String          @db.VarChar(250)
-  date_of_birth        DateTime        @db.Date
-  date_of_death        DateTime?       @db.Date
-  id_card_number       String?         @db.VarChar(20)
-  phone_number         String?         @db.Char(30)
+  place_of_birth       String
+  date_of_birth        DateTime
+  date_of_death        DateTime?
+  id_card_number       String?
+  phone_number         String?
   email                String?
   marital_status       MaritalStatus?
-  last_education_level String?         @db.VarChar(100)
-  education_major      String?         @db.VarChar(100)
-  job_name             String?         @db.VarChar(100)
+  last_education_level String?
+  education_major      String?
+  job_name             String?
   biodata              Bytes?
   spiritualUser        SpiritualUser?
   domicile_location_id Int
@@ -46,9 +46,9 @@ model User {
 
 model Role {
   role_id     Int        @id @default(autoincrement())
-  name        String     @db.VarChar(100)
-  description String?    @db.VarChar(255)
-  permissions Json       @db.Json
+  name        String
+  description String?
+  permissions Json
   created_at  DateTime?  @default(now())
   updated_at  DateTime?  @updatedAt
   userRoles   UserRole[]
@@ -65,44 +65,44 @@ model UserRole {
 }
 
 model QiuDao {
-  qiu_dao_id               String        @id @db.VarChar(16)
+  qiu_dao_id               String        @id
   User                     User?
-  qiu_dao_name             String?       @db.VarChar(250)
-  qiu_dao_mandarin_name    String?       @db.VarChar(250)
+  qiu_dao_name             String?
+  qiu_dao_mandarin_name    String?
   qiu_dao_location_id      Int
   qiu_dao_location         Fotang        @relation(fields: [qiu_dao_location_id], references: [fotang_id])
   dian_chuan_shi_id        Int?
   dian_chuan_shi           DianChuanShi? @relation("DianChuanShiRelation", fields: [dian_chuan_shi_id], references: [id])
   yin_shi_qd_id            String?
-  yin_shi_qd_name          String?       @db.VarChar(250)
-  yin_shi_qd_mandarin_name String?       @db.VarChar(4)
+  yin_shi_qd_name          String?
+  yin_shi_qd_mandarin_name String?
   yin_shi_reference        QiuDao?       @relation("YinShiReference", fields: [yin_shi_qd_id], references: [qiu_dao_id])
   yin_shi_dependents       QiuDao[]      @relation("YinShiReference")
   bao_shi_qd_id            String?
-  bao_shi_qd_name          String?       @db.VarChar(250)
-  bao_shi_qd_mandarin_name String?       @db.VarChar(4)
+  bao_shi_qd_name          String?
+  bao_shi_qd_mandarin_name String?
   bao_shi_reference        QiuDao?       @relation("BaoShiReference", fields: [bao_shi_qd_id], references: [qiu_dao_id])
   bao_shi_dependents       QiuDao[]      @relation("BaoShiReference")
-  lunar_sui_ci_year        String        @db.VarChar(3)
-  lunar_month              String        @db.VarChar(4)
-  lunar_day                String        @db.VarChar(4)
-  lunar_shi_chen_time      String        @db.VarChar(2)
-  qiu_dao_card_s3_url      String?       @db.VarChar(250)
+  lunar_sui_ci_year        String
+  lunar_month              String
+  lunar_day                String
+  lunar_shi_chen_time      String
+  qiu_dao_card_s3_url      String?
   created_at               DateTime?     @default(now())
   updated_at               DateTime?     @updatedAt
 }
 
 model Location {
   location_id            Int       @id @default(autoincrement())
-  location_name          String?   @db.VarChar(250)
-  location_mandarin_name String?   @db.VarChar(20)
+  location_name          String?
+  location_mandarin_name String?
   latitude               Int?
   longitude              Int?
-  country_iso            String    @default("IDN") @db.Char(3)
+  country_iso            String    @default("IDN")
   locality               Locality  @relation(fields: [localityId], references: [id])
   localityId             Int
-  street                 String?   @db.VarChar(250)
-  postal_code            String?   @db.VarChar(10)
+  street                 String?
+  postal_code            String?
   users_domicile         User[]    @relation("domicile")
   users_id_card_location User[]    @relation("id_card_location")
   created_at             DateTime? @default(now())
@@ -113,8 +113,8 @@ model UserCredential {
   user_credential Int       @id @default(autoincrement())
   user_id         String?   @unique
   user            User?     @relation(fields: [user_id], references: [user_info_id])
-  username        String    @unique @db.VarChar(500)
-  hashed_password String?   @db.VarChar(500)
+  username        String    @unique
+  hashed_password String?
   last_logged_in  DateTime  @default(now())
   created_at      DateTime? @default(now())
   updated_at      DateTime? @updatedAt
@@ -122,16 +122,16 @@ model UserCredential {
 
 model Fotang {
   fotang_id              Int       @id
-  location_name          String    @db.VarChar(250)
-  location_mandarin_name String?   @db.VarChar(20)
+  location_name          String
+  location_mandarin_name String?
   latitude               Int?
   longitude              Int?
   area                   Korwil
-  country_iso            String    @default("IDN") @db.Char(3)
+  country_iso            String    @default("IDN")
   locality               Locality  @relation(fields: [localityId], references: [id])
   localityId             Int
-  street                 String?   @db.VarChar(250)
-  postal_code            String?   @db.VarChar(10)
+  street                 String?
+  postal_code            String?
   QiuDao                 QiuDao[]
   created_at             DateTime? @default(now())
   updated_at             DateTime? @updatedAt
@@ -140,16 +140,16 @@ model Fotang {
 
 model Institution {
   institution_id                Int     @id
-  institution_name              String  @db.VarChar(250)
-  institution_leader            String  @db.VarChar(250)
-  institution_secretary_general String? @db.VarChar(250)
+  institution_name              String
+  institution_leader            String
+  institution_secretary_general String?
   events                        Event[]
 }
 
 model DianChuanShi {
   id             Int       @id
-  name           String?   @db.VarChar(250)
-  mandarin_name  String?   @db.VarChar(4)
+  name           String?
+  mandarin_name  String?
   area           Korwil
   is_fuwuyuan    Boolean?
   ling_ming_time DateTime?
@@ -220,8 +220,8 @@ model Event {
   event_id              Int            @id @default(autoincrement())
   category              EventCategory
   event_type            EventType
-  event_name            String         @db.VarChar(200)
-  event_mandarin_name   String?        @db.VarChar(200)
+  event_name            String
+  event_mandarin_name   String?
   is_in_fotang          Boolean        @default(true)
   fotangId              Int?
   fotang                Fotang?        @relation(fields: [fotangId], references: [fotang_id])
@@ -229,12 +229,12 @@ model Event {
   eventLocation         EventLocation? @relation(fields: [eventLocationId], references: [event_location_id])
   institutionId         Int?
   institution           Institution?   @relation(fields: [institutionId], references: [institution_id])
-  lunar_sui_ci_year     String?        @db.VarChar(3)
-  lunar_month           String?        @db.VarChar(4)
-  lunar_day             String?        @db.VarChar(4)
+  lunar_sui_ci_year     String?
+  lunar_month           String?
+  lunar_day             String?
   is_recurring          Boolean
-  description           String?        @db.VarChar(1000)
-  poster_s3_bucket_link String?        @db.VarChar(250)
+  description           String?
+  poster_s3_bucket_link String?
   created_at            DateTime?      @default(now())
   updated_at            DateTime?      @updatedAt
   occurrences           Occurrence[]
@@ -242,11 +242,11 @@ model Event {
 
 model EventLocation {
   event_location_id Int       @id @default(autoincrement())
-  location_name     String    @db.VarChar(250)
+  location_name     String
   cityId            Int
   city              City      @relation(fields: [cityId], references: [id])
-  street            String?   @db.VarChar(250)
-  postal_code       String?   @db.VarChar(10)
+  street            String?
+  postal_code       String?
   area              Korwil
   events            Event[]
   created_at        DateTime? @default(now())

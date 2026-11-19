@@ -1121,14 +1121,14 @@ export default function Event() {
     if (error) {
       toast({
         title: "Error Memuat Kegiatan",
-        description: "Terjadi kesalahan. Silakan coba lagi.",
+        description:
+          error?.response?.data?.message || "Terjadi kesalahan. Silakan coba lagi.",
         status: "error",
         duration: 5000,
         isClosable: true,
       });
-      refetch();
     }
-  }, [error, refetch, toast]);
+  }, [error, toast]);
 
   const handleAreaChange = useCallback((e) => {
     const selectedArea = e.target.value;

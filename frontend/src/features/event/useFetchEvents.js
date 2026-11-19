@@ -101,9 +101,9 @@ export const useFetchEvents = ({
   return useQuery({
     queryKey,
     queryFn: async () => {
-      const response = await axiosInstance
-        .get("/event/filtered", { params: queryParams })
-        .catch(() => ({ data: [] }));
+      const response = await axiosInstance.get("/event/filtered", {
+        params: queryParams,
+      });
 
       if (!response.data || !Array.isArray(response.data)) return [];
 

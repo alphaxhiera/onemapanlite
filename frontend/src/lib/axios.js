@@ -21,4 +21,21 @@ axiosInstance.interceptors.request.use(
     }
 );
 
+// Expired/invalid tokens previously left the app stuck on failed requests.
+axiosInstance.interceptors.response.use(
+    (response) => response,
+    (error) => {
+        if (typeof window !== "undefined" && error.response?.status === 401) {
+            localStorage.removeItem("token");
+            localStorage.removeItem("user");
+            localStorage.removeItem("role");
+
+            if (!window.location.pathname.startsWith("/login")) {
+                window.location.href = "/login";
+            }
+        }
+        return Promise.reject(error);
+    }
+);
+
 export { axiosInstance };

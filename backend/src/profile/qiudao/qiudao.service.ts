@@ -15,6 +15,46 @@ interface QiudaoInput extends Omit<Prisma.QiuDaoCreateInput, "qiu_dao_card_s3_ur
   dian_chuan_shi_id?: number;
 }
 
+/**
+ * Build the next sequential QiuDao id for a vihara. Deriving it from the last
+ * existing id (instead of COUNT(*)) keeps ids unique after deletions, which the
+ * previous implementation could reuse and collide on the primary key.
+ */
+export const generateNextQiuDaoId = async (
+  fotangId: number,
+  area: Korwil
+): Promise<string> => {
+  const korwilDigit = area.replace("Korwil_", "");
+  const viharaIdPadded = fotangId.toString().padStart(4, "0");
+  const prefix = `${korwilDigit}${viharaIdPadded}-`;
+
+  const last = await prisma.qiuDao.findFirst({
+    where: { qiu_dao_id: { startsWith: prefix } },
+    orderBy: { qiu_dao_id: "desc" },
+    select: { qiu_dao_id: true },
+  });
+
+  let seriIndex = 0;
+  let nomor = 0;
+
+  if (last) {
+    const match = /^([A-Z])(\d{6})$/.exec(last.qiu_dao_id.slice(prefix.length));
+    if (match) {
+      seriIndex = match[1].charCodeAt(0) - 65;
+      nomor = parseInt(match[2], 10);
+    }
+  }
+
+  nomor += 1;
+  if (nomor > 999999) {
+    nomor = 1;
+    seriIndex += 1;
+  }
+
+  const seriAlpha = String.fromCharCode(65 + seriIndex);
+  return `${prefix}${seriAlpha}${nomor.toString().padStart(6, "0")}`;
+};
+
 export const registerQiuDao = async (data: QiudaoInput): Promise<QiuDao> => {
   const {
     qiu_dao_name,
@@ -52,21 +92,7 @@ export const registerQiuDao = async (data: QiudaoInput): Promise<QiuDao> => {
   const fotang = await findFotangById(qiu_dao_location_id);
   if (!fotang) throw new Error("Vihara tidak ditemukan");
 
-  if (!fotang) throw new Error("Vihara tidak ditemukan");
-
-  const korwilDigit = fotang.area.replace("Korwil_", "");
-  const viharaIdPadded = qiu_dao_location_id.toString().padStart(4, "0");
-
-  const totalInVihara = await prisma.qiuDao.count({
-    where: { qiu_dao_location_id }
-  });
-
-  const seriIndex = Math.floor(totalInVihara / 999999);
-  const seriAlpha = String.fromCharCode(65 + seriIndex);
-  const urutanDalamSeri = (totalInVihara % 999999) + 1;
-  const nomorUrut = urutanDalamSeri.toString().padStart(6, "0");
-
-  const generatedId = `${korwilDigit}${viharaIdPadded}-${seriAlpha}${nomorUrut}`;
+  const generatedId = await generateNextQiuDaoId(fotang.fotang_id, fotang.area);
 
   return await createQiuDao({
     qiu_dao_id: generatedId,
@@ -146,14 +172,58 @@ export const getQiuDaoById = async (id: string): Promise<QiuDaoWithRelations | n
   return await findQiuDaoById(id);
 };
 
+export type QiuDaoUpdatePayload = {
+  qiu_dao_name?: string | null;
+  qiu_dao_mandarin_name?: string | null;
+  yin_shi_qd_name?: string | null;
+  yin_shi_qd_mandarin_name?: string | null;
+  bao_shi_qd_name?: string | null;
+  bao_shi_qd_mandarin_name?: string | null;
+  lunar_sui_ci_year?: string | null;
+  lunar_month?: string | null;
+  lunar_day?: string | null;
+  lunar_shi_chen_time?: string | null;
+  qiu_dao_card_s3_url?: string | null;
+  dian_chuan_shi_id?: number | null;
+  qiu_dao_location_id?: number | null;
+};
+
 export const updateQiuDaoById = async (
   id: string,
-  updatedData: Prisma.QiuDaoUpdateInput
+  updatedData: QiuDaoUpdatePayload
 ): Promise<QiuDao> => {
   if (!id || typeof id !== "string") {
     throw new Error("ID QiuDao tidak valid");
   }
-  return await updateQiuDao(id, updatedData);
+
+  // Never pass the request body straight to Prisma: qiu_dao_id must stay
+  // immutable and all other columns are whitelisted explicitly.
+  const data: Prisma.QiuDaoUpdateInput = {};
+
+  if (updatedData.qiu_dao_name !== undefined) data.qiu_dao_name = updatedData.qiu_dao_name;
+  if (updatedData.qiu_dao_mandarin_name !== undefined) data.qiu_dao_mandarin_name = updatedData.qiu_dao_mandarin_name;
+  if (updatedData.yin_shi_qd_name !== undefined) data.yin_shi_qd_name = updatedData.yin_shi_qd_name;
+  if (updatedData.yin_shi_qd_mandarin_name !== undefined) data.yin_shi_qd_mandarin_name = updatedData.yin_shi_qd_mandarin_name;
+  if (updatedData.bao_shi_qd_name !== undefined) data.bao_shi_qd_name = updatedData.bao_shi_qd_name;
+  if (updatedData.bao_shi_qd_mandarin_name !== undefined) data.bao_shi_qd_mandarin_name = updatedData.bao_shi_qd_mandarin_name;
+  if (updatedData.lunar_sui_ci_year !== undefined && updatedData.lunar_sui_ci_year !== null) data.lunar_sui_ci_year = updatedData.lunar_sui_ci_year;
+  if (updatedData.lunar_month !== undefined && updatedData.lunar_month !== null) data.lunar_month = updatedData.lunar_month;
+  if (updatedData.lunar_day !== undefined && updatedData.lunar_day !== null) data.lunar_day = updatedData.lunar_day;
+  if (updatedData.lunar_shi_chen_time !== undefined && updatedData.lunar_shi_chen_time !== null) data.lunar_shi_chen_time = updatedData.lunar_shi_chen_time;
+  if (updatedData.qiu_dao_card_s3_url !== undefined) data.qiu_dao_card_s3_url = updatedData.qiu_dao_card_s3_url;
+
+  if (updatedData.dian_chuan_shi_id !== undefined) {
+    data.dian_chuan_shi = updatedData.dian_chuan_shi_id
+      ? { connect: { id: updatedData.dian_chuan_shi_id } }
+      : { disconnect: true };
+  }
+
+  if (updatedData.qiu_dao_location_id !== undefined) {
+    if (!updatedData.qiu_dao_location_id) throw new Error("Lokasi qiudao wajib diisi");
+    data.qiu_dao_location = { connect: { fotang_id: updatedData.qiu_dao_location_id } };
+  }
+
+  return await updateQiuDao(id, data);
 };
 
 export const deleteQiuDaoById = async (id: string): Promise<QiuDao> => {

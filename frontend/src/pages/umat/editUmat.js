@@ -183,7 +183,7 @@ export default function EditUmat() {
           gender: data.gender || "",
           blood_type: data.blood_type || "",
           place_of_birth: data.place_of_birth || "",
-          date_of_birth: data.date_of_birth ? new Date(data.date_of_birth).toISOString().slice(0, 10) : "",
+          date_of_birth: data.date_of_birth ? new Date(data.date_of_birth).toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" }) : "",
           id_card_number: data.id_card_number || "",
           email: data.email || "",
           last_education_level: data.last_education_level || "",

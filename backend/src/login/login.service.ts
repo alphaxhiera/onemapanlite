@@ -1,5 +1,6 @@
 import { UserCredential } from "@prisma/client";
 import bcrypt from "bcrypt";
+import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import { findUserByUsername, updateLastLoggedIn } from "./login.repository";
 import prisma from "../db";
@@ -23,6 +24,25 @@ interface LoginResult {
   };
 }
 
+/**
+ * In development, include a safe fingerprint of the submitted credentials so a
+ * browser sending unexpected values (autofill, keyboard layout, stray spaces)
+ * can be diagnosed. Password characters are never logged or returned.
+ */
+const loginFailureMessage = (username: string, password: string): string => {
+  if (env.nodeEnv === "production") {
+    return "Username atau password salah";
+  }
+
+  const passwordSha = crypto
+    .createHash("sha256")
+    .update(password, "utf8")
+    .digest("hex")
+    .slice(0, 8);
+
+  return `Username atau password salah [dev: user="${username}", passLen=${password.length}, passSha=${passwordSha}]`;
+};
+
 export const loginUser = async ({ username, password }: LoginInput): Promise<LoginResult> => {
   if (typeof username !== "string" || typeof password !== "string" || !username.trim() || !password) {
     throw new HttpError("Username dan password wajib diisi", 400);
@@ -33,16 +53,16 @@ export const loginUser = async ({ username, password }: LoginInput): Promise<Log
   // Use the same message for unknown users and wrong passwords so the
   // endpoint cannot be used to enumerate valid usernames.
   if (!user) {
-    throw new HttpError("Username atau password salah", 401);
+    throw new HttpError(loginFailureMessage(username, password), 401);
   }
 
   if (!user.username || user.user_credential == null || user.hashed_password == null) {
-    throw new HttpError("Username atau password salah", 401);
+    throw new HttpError(loginFailureMessage(username, password), 401);
   }
 
   const isPasswordValid = await bcrypt.compare(password, user.hashed_password);
   if (!isPasswordValid) {
-    throw new HttpError("Username atau password salah", 401);
+    throw new HttpError(loginFailureMessage(username, password), 401);
   }
 
   const userInfo = await prisma.user.findFirst({
@@ -71,7 +91,7 @@ export const loginUser = async ({ username, password }: LoginInput): Promise<Log
     fotangId = userInfo.qiudao.qiu_dao_location_id;
   }
 
-  const normalizedRole = primaryRole.toLowerCase().replace(/\s+/g, "");
+  const normalizedRole = primaryRole.toLowerCase().replace(/[\s_]+/g, "");
   let permissions: any = {};
 
   if (userInfo.userRoles && userInfo.userRoles.length > 0) {

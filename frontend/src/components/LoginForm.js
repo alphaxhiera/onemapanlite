@@ -19,6 +19,7 @@ import { useRouter } from "next/router";
 import NextLink from "next/link";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { loginApi } from "@/features/login/loginApi";
+import { API_BASE_URL } from "@/lib/api";
 
 export default function LoginForm() {
   const router = useRouter();
@@ -49,7 +50,17 @@ export default function LoginForm() {
     },
     onError: (error) => {
       setForm((prev) => ({ ...prev, password: "" }));
-      setFlashMessage(error?.response?.data?.message || "Terjadi kesalahan saat login");
+      const status = error?.response?.status;
+      const serverMessage = error?.response?.data?.message;
+
+      if (serverMessage) {
+        setFlashMessage(status ? `${serverMessage} (HTTP ${status})` : serverMessage);
+      } else {
+        // No response at all: usually the backend is not running or CORS blocked.
+        setFlashMessage(
+          `Tidak dapat terhubung ke server API di ${API_BASE_URL}. Pastikan backend berjalan.`
+        );
+      }
     },
   });
 

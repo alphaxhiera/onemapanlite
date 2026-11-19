@@ -268,6 +268,10 @@ export const useEventForm = ({
       payload.location_name = formData.location_name.trim();
       payload.cityId = parseInt(formData.external_cityId || formData.cityId);
       payload.area = formData.external_area || formData.area;
+
+      if (isEditMode && formData.eventLocationId) {
+        payload.eventLocationId = parseInt(formData.eventLocationId);
+      }
     }
 
     if (category === "External" && formData.institutionId) {
@@ -281,7 +285,7 @@ export const useEventForm = ({
     }
 
     return payload;
-  }, [formData]);
+  }, [formData, isEditMode]);
 
   const uploadAndSubmit = useCallback(async (e, cropperRef, isUpdate = false) => {
     e.preventDefault();
@@ -306,7 +310,7 @@ export const useEventForm = ({
         const croppedFile = await getCroppedImage(cropperRef);
         if (croppedFile) {
           const fd = new FormData();
-          fd.append("file", croppedFile);
+          fd.append("poster", croppedFile);
 
           const res = await axiosInstance.post("/event/upload-poster", fd, {
             headers: { "Content-Type": "multipart/form-data" },

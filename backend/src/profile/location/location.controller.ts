@@ -14,6 +14,7 @@ import {
 } from "./location.service";
 import prisma from "../../db";
 import { authenticateJWT } from "../../middleware/authentication";
+import { requireNationalAccess } from "../../middleware/require-national";
 import { sendError } from "../../utils/respond";
 
 const router = Router();
@@ -148,7 +149,7 @@ router.get("/:id", async (req: Request, res: Response) => {
   })();
 });
 
-router.patch("/:id", async (req, res) => {
+router.patch("/:id", requireNationalAccess, async (req, res) => {
   void (async () => {
     try {
       const id = parseInt(req.params.id);
@@ -170,7 +171,7 @@ router.patch("/:id", async (req, res) => {
   })();
 });
 
-router.delete("/:id", async (req: Request, res: Response) => {
+router.delete("/:id", requireNationalAccess, async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id);
     await deleteLocationById(id);

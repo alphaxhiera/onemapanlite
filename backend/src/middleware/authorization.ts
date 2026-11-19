@@ -42,7 +42,9 @@ export const authorize = (required: PermissionCheck) => {
         return;
       }
 
-      const normalizedRole = req.user.normalizedRole || (req.user.role ? req.user.role.toLowerCase().replace(/\s+/g, "") : "");
+      const normalizedRole = (req.user.normalizedRole || req.user.role || "")
+        .toLowerCase()
+        .replace(/[\s_]+/g, "");
 
       let hasAccess = false;
       let userScope = req.user.scope || "self";
@@ -66,6 +68,16 @@ export const authorize = (required: PermissionCheck) => {
 
         if (normalizedRole === "adminvihara") {
           req.userScope = "fotang";
+
+          const requiredScopes = Array.isArray(required.scope)
+            ? required.scope
+            : required.scope
+              ? [required.scope]
+              : [];
+          if (requiredScopes.length > 0 && !requiredScopes.includes("fotang")) {
+            res.status(403).json({ message: `Forbidden: Scope mismatch for ${required.feature}` });
+            return;
+          }
         } else {
           req.userScope = "nasional";
         }
@@ -85,7 +97,9 @@ export const authorize = (required: PermissionCheck) => {
         (required.feature === "qiudao" || required.feature === "umat") &&
         required.action === "read"
       ) {
-        userScope = "wilayah";
+        // A regular member may only read their own profile, not the whole
+        // wilayah directory (names, ID numbers, phone numbers, addresses).
+        userScope = "self";
         hasAccess = true;
       } else if (
         (required.feature === "umat" || required.feature === "qiudao") &&
@@ -104,7 +118,7 @@ export const authorize = (required: PermissionCheck) => {
         userRole = normalizedRole || userRoles[0].role.name.toLowerCase().replace(/\s+/g, "");
 
         for (const userRole of userRoles) {
-          const roleName = userRole.role.name.toLowerCase().replace(/\s+/g, "");
+          const roleName = userRole.role.name.toLowerCase().replace(/[\s_]+/g, "");
           const permissions: any = userRole.role.permissions;
           const featurePerms = permissions[required.feature];
 

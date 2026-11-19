@@ -1,12 +1,32 @@
 import ExcelJS from "exceljs";
 import { getLocalityId, getOrCreateLocation } from "../profile/location/location.repository";
 import { createQiuDao } from "../profile/qiudao/qiudao.repository";
+import { generateNextQiuDaoId } from "../profile/qiudao/qiudao.service";
 import { createUser } from "../profile/user/user.repository";
 import prisma from "../db";
 import { CellValue } from "exceljs";
 import { BloodType, Gender, Korwil, MaritalStatus, Prisma, SpiritualStatus } from "@prisma/client";
 import { Fotang } from "@prisma/client";
 import { Buffer } from "buffer"; 
+
+export interface ImportScope {
+    allowedArea?: Korwil;
+    allowedFotangId?: number;
+}
+
+const scopeWhere = (scope?: ImportScope): Prisma.FotangWhereInput => {
+    const where: Prisma.FotangWhereInput = {};
+    if (scope?.allowedArea) where.area = scope.allowedArea;
+    if (scope?.allowedFotangId) where.fotang_id = scope.allowedFotangId;
+    return where;
+};
+
+const qiuDaoScopeWhere = (scope?: ImportScope): Prisma.QiuDaoWhereInput => {
+    const where: Prisma.QiuDaoWhereInput = {};
+    if (scope?.allowedFotangId) where.qiu_dao_location_id = scope.allowedFotangId;
+    if (scope?.allowedArea) where.qiu_dao_location = { area: scope.allowedArea };
+    return where;
+};
 
 function safeString(val: CellValue | undefined | null): string | undefined {
     return val ? String(val).trim() : undefined;
@@ -58,22 +78,25 @@ function safeParseKorwil(value?: string): Korwil | undefined {
     return `Korwil_${num}` as Korwil;
 }
 
-async function getFotang(data: {
-    location_name?: string;
-    location_mandarin_name?: string;
-    area?: Korwil;
-}): Promise<Fotang | null> {
+async function getFotang(
+    data: {
+        location_name?: string;
+        location_mandarin_name?: string;
+        area?: Korwil;
+    },
+    scope?: ImportScope
+): Promise<Fotang | null> {
     const { location_name, location_mandarin_name, area } = data;
 
     if (!location_name && !location_mandarin_name) return null;
 
+    const scopeFilter = scopeWhere(scope);
     const orConditions: Prisma.FotangWhereInput["OR"] = [];
 
     if (location_name) {
         orConditions.push({
             location_name: {
                 equals: location_name.trim(),
-                mode: "insensitive",
             },
         });
     }
@@ -82,15 +105,15 @@ async function getFotang(data: {
         orConditions.push({
             location_mandarin_name: {
                 equals: location_mandarin_name.trim(),
-                mode: "insensitive",
             },
         });
     }
 
-    if (area && orConditions.length > 0) {
+    if (area) {
         const exactMatch = await prisma.fotang.findFirst({
             where: {
                 AND: [
+                    scopeFilter,
                     { area },
                     { OR: orConditions },
                 ],
@@ -99,9 +122,11 @@ async function getFotang(data: {
         if (exactMatch) return exactMatch;
     }
 
+    // Never fall back to a fotang outside the caller's area: that let a
+    // wilayah-scoped import create data for another wilayah.
     return await prisma.fotang.findFirst({
         where: {
-            OR: orConditions,
+            AND: [scopeFilter, { OR: orConditions }],
         },
     });
 }
@@ -112,7 +137,10 @@ function getCellValue(row: ExcelJS.Row, headerMap: Record<string, number>, heade
     return row.getCell(col).value;
 }
 
-export const importUmatFromExcel = async (buffer: Buffer | ArrayBuffer) => {
+export const importUmatFromExcel = async (
+    buffer: Buffer | ArrayBuffer,
+    scope?: ImportScope
+) => {
     const workbook = new ExcelJS.Workbook();
     let data: Buffer | Uint8Array;
 
@@ -218,12 +246,22 @@ export const importUmatFromExcel = async (buffer: Buffer | ArrayBuffer) => {
             let qiuDao = null;
             if (qdMandarinName) {
                 qiuDao = await prisma.qiuDao.findFirst({
-                    where: { qiu_dao_mandarin_name: { equals: qdMandarinName, mode: "insensitive" } },
+                    where: {
+                        AND: [
+                            qiuDaoScopeWhere(scope),
+                            { qiu_dao_mandarin_name: { equals: qdMandarinName } },
+                        ],
+                    },
                 });
             }
             if (!qiuDao && qdName) {
                 qiuDao = await prisma.qiuDao.findFirst({
-                    where: { qiu_dao_name: { equals: qdName, mode: "insensitive" } },
+                    where: {
+                        AND: [
+                            qiuDaoScopeWhere(scope),
+                            { qiu_dao_name: { equals: qdName } },
+                        ],
+                    },
                 });
             }
 
@@ -334,7 +372,10 @@ export const importUmatFromExcel = async (buffer: Buffer | ArrayBuffer) => {
     };
 };
 
-export const importQiudaoFromExcel = async (buffer: Buffer | ArrayBuffer) => {
+export const importQiudaoFromExcel = async (
+    buffer: Buffer | ArrayBuffer,
+    scope?: ImportScope
+) => {
     const workbook = new ExcelJS.Workbook();
 
     const data: Buffer | Uint8Array = Buffer.isBuffer(buffer)
@@ -411,24 +452,27 @@ export const importQiudaoFromExcel = async (buffer: Buffer | ArrayBuffer) => {
 
             const area = safeParseKorwil(rawWilayah);
 
-            const fotang = await getFotang({
-                location_name,
-                location_mandarin_name,
-                area,
-            });
+            const fotang = await getFotang(
+                {
+                    location_name,
+                    location_mandarin_name,
+                    area,
+                },
+                scope
+            );
 
             if (!fotang) {
                 errorCount++;
-                console.log(`Baris ${i}: Vihara tidak ditemukan → "${location_name}" / "${location_mandarin_name}" (Wilayah: "${rawWilayah}")`);
+                console.log(`Baris ${i}: Vihara tidak ditemukan â†’ "${location_name}" / "${location_mandarin_name}" (Wilayah: "${rawWilayah}")`);
                 continue;
             }
 
             const orConditions: Prisma.QiuDaoWhereInput[] = [];
             if (qiu_dao_name) {
-                orConditions.push({ qiu_dao_name: { equals: qiu_dao_name, mode: "insensitive" } });
+                orConditions.push({ qiu_dao_name: { equals: qiu_dao_name } });
             }
             if (qiu_dao_mandarin_name) {
-                orConditions.push({ qiu_dao_mandarin_name: { equals: qiu_dao_mandarin_name, mode: "insensitive" } });
+                orConditions.push({ qiu_dao_mandarin_name: { equals: qiu_dao_mandarin_name } });
             }
 
             const existing = await prisma.qiuDao.findFirst({
@@ -440,38 +484,27 @@ export const importQiudaoFromExcel = async (buffer: Buffer | ArrayBuffer) => {
 
             if (existing) {
                 duplicateCount++;
-                console.log(`Baris ${i}: Duplikat → ${qiu_dao_name || qiu_dao_mandarin_name}`);
+                console.log(`Baris ${i}: Duplikat â†’ ${qiu_dao_name || qiu_dao_mandarin_name}`);
                 continue;
             }
 
             const pandita = await prisma.dianChuanShi.findFirst({
                 where: {
+                    area: fotang.area,
                     OR: [
-                        dian_chuan_shi_name ? { name: { equals: dian_chuan_shi_name, mode: "insensitive" } } : null,
-                        dian_chuan_shi_mandarin_name ? { mandarin_name: { equals: dian_chuan_shi_mandarin_name, mode: "insensitive" } } : null,
+                        dian_chuan_shi_name ? { name: { equals: dian_chuan_shi_name } } : null,
+                        dian_chuan_shi_mandarin_name ? { mandarin_name: { equals: dian_chuan_shi_mandarin_name } } : null,
                     ].filter(Boolean) as any,
                 },
             });
 
             if (!pandita) {
                 errorCount++;
-                console.log(`Baris ${i}: Pandita tidak ditemukan → "${dian_chuan_shi_name}" / "${dian_chuan_shi_mandarin_name}"`);
+                console.log(`Baris ${i}: Pandita tidak ditemukan â†’ "${dian_chuan_shi_name}" / "${dian_chuan_shi_mandarin_name}"`);
                 continue;
             }
 
-            const korwilDigit = fotang.area.replace("Korwil_", "");
-            const viharaIdPadded = fotang.fotang_id.toString().padStart(4, "0");
-
-            const totalInVihara = await prisma.qiuDao.count({
-                where: { qiu_dao_location_id: fotang.fotang_id },
-            });
-
-            const seriIndex = Math.floor(totalInVihara / 999999);
-            const seriAlpha = String.fromCharCode(65 + seriIndex);
-            const urutanDalamSeri = (totalInVihara % 999999) + 1;
-            const nomorUrut = urutanDalamSeri.toString().padStart(6, "0");
-
-            const generatedQiuDaoId = `${korwilDigit}${viharaIdPadded}-${seriAlpha}${nomorUrut}`;
+            const generatedQiuDaoId = await generateNextQiuDaoId(fotang.fotang_id, fotang.area);
 
             await createQiuDao({
                 qiu_dao_id: generatedQiuDaoId,
@@ -490,7 +523,7 @@ export const importQiudaoFromExcel = async (buffer: Buffer | ArrayBuffer) => {
             });
 
             successCount++;
-            console.log(`Baris ${i}: Berhasil → ${qiu_dao_name || qiu_dao_mandarin_name} di ${fotang.location_name}`);
+            console.log(`Baris ${i}: Berhasil â†’ ${qiu_dao_name || qiu_dao_mandarin_name} di ${fotang.location_name}`);
 
         } catch (err: any) {
             console.error(`Error import baris ${i}:`, err.message);

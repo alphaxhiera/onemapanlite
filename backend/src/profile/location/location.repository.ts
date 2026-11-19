@@ -18,13 +18,13 @@ export const getLocalityId = async ({
 
   const locality = await prisma.locality.findFirst({
     where: {
-      name: { equals: name.trim(), mode: "insensitive" },
+      name: { equals: name.trim() },
       district: {
-        name: { equals: districtName.trim(), mode: "insensitive" },
+        name: { equals: districtName.trim() },
         city: {
-          name: { equals: cityName.trim(), mode: "insensitive" },
+          name: { equals: cityName.trim() },
           province: {
-            name: { equals: provinceName.trim(), mode: "insensitive" },
+            name: { equals: provinceName.trim() },
           },
         },
       },

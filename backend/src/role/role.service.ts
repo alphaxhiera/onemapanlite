@@ -77,7 +77,7 @@ const validatePermissions = (permissions: Permissions) => {
 };
 
 const validateAreaAccess = (userRole: string, userArea: string | null, permissions: Permissions) => {
-    const normalizedUserRole = userRole?.toLowerCase().trim().replace(/\s+/g, "");
+    const normalizedUserRole = userRole?.toLowerCase().trim().replace(/[\s_]+/g, "");
     
     if (
         normalizedUserRole === "superadmin" ||
@@ -92,7 +92,7 @@ const validateAreaAccess = (userRole: string, userArea: string | null, permissio
         const mod = permissions[module];
         if (mod) {
             if (mod.scope === "nasional") {
-                continue;
+                throw new Error("Admin wilayah tidak dapat membuat peran dengan scope nasional");
             }
             if (mod.scope === "wilayah" && userArea.startsWith("Korwil_")) {
                 continue;
@@ -100,7 +100,7 @@ const validateAreaAccess = (userRole: string, userArea: string | null, permissio
             if (mod.scope === "fotang") {
                 continue;
             }
-            throw new Error(`Admin hanya dapat membuat peran dengan scope "nasional" atau sesuai wilayah ${userArea}`);
+            throw new Error(`Admin hanya dapat membuat peran dengan scope "wilayah", "fotang", atau "self" untuk ${userArea}`);
         }
         }
     } else {
@@ -141,7 +141,7 @@ export const fetchAllRoles = async (
         const permissions = role.permissions as Permissions;
         return Object.keys(permissions).every(module => {
             const mod = permissions[module];
-            return mod && (mod.scope === "nasional" || mod.scope === userArea);
+            return mod && mod.scope !== "nasional";
         });
     });
 };

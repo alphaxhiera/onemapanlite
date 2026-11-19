@@ -23,6 +23,50 @@ const router = express.Router();
 
 router.use(authenticateJWT);
 
+const normalizeRoleName = (name?: string | null): string =>
+    (name || "").toLowerCase().replace(/[\s_]+/g, "");
+
+const isSuperAdminRequest = (req: AuthRequest): boolean =>
+    normalizeRoleName(req.user?.role) === "superadmin";
+
+/**
+ * Only a Super Admin may touch a Super Admin role, or change the roles of a
+ * user that currently holds one. Without this a Ketua Lembaga / Sekjen could
+ * grant themselves (or anyone) unconditional national access.
+ */
+const assertCanManageRoles = async (
+    req: AuthRequest,
+    res: Response,
+    targetUserId: string,
+    targetRoleId: number
+): Promise<boolean> => {
+    if (isSuperAdminRequest(req)) return true;
+
+    const [role, existingRoles] = await Promise.all([
+        prisma.role.findUnique({
+            where: { role_id: targetRoleId },
+            select: { name: true },
+        }),
+        prisma.userRole.findMany({
+            where: { user_id: targetUserId },
+            select: { role: { select: { name: true } } },
+        }),
+    ]);
+
+    const touchesSuperAdmin =
+        normalizeRoleName(role?.name) === "superadmin" ||
+        existingRoles.some((ur) => normalizeRoleName(ur.role?.name) === "superadmin");
+
+    if (touchesSuperAdmin) {
+        res.status(403).json({
+            message: "Forbidden: hanya Super Admin yang dapat mengelola peran Super Admin",
+        });
+        return false;
+    }
+
+    return true;
+};
+
 // Role and permission management is restricted to national-level roles,
 // matching the frontend navigation rules.
 router.use((req: AuthRequest, res: Response, next) => {
@@ -43,8 +87,8 @@ router.get("/users", (req: AuthRequest, res: Response) => {
 
             let whereClause: any = {};
 
-            const roleLower = (req.user.role || "").toLowerCase().trim().replace(/\s+/g, "");
-            if (!roleLower.includes("superadmin") && req.user.area) {
+            const roleLower = normalizeRoleName(req.user.role);
+            if (roleLower !== "superadmin" && req.user.area) {
                 whereClause.qiudao = {
                     qiu_dao_location: {
                     area: req.user.area as Korwil
@@ -119,7 +163,7 @@ router.get("/:id", (req: AuthRequest, res: Response) => {
                 res.status(404).json({ message: "Peran tidak ditemukan" });
                 return;
             }
-            if (req.user.role !== "Super_Admin") {
+            if (normalizeRoleName(req.user.role) !== "superadmin") {
                 const permissions = role.permissions as any;
                 const hasAccess = Object.keys(permissions).every(
                     (module: string) => permissions[module].scope === "nasional" || permissions[module].scope === req.user!.area
@@ -252,6 +296,10 @@ router.delete("/remove", (req: AuthRequest, res: Response) => {
                 return;
             }
 
+            if (!(await assertCanManageRoles(req, res, parsedUserId, parsedRoleId))) {
+                return;
+            }
+
             const existingUserRole = await prisma.userRole.findUnique({
                 where: {
                     user_id_role_id: {
@@ -347,6 +395,10 @@ router.post("/assign", (req: AuthRequest, res: Response) => {
 
             if (isNaN(roleId)) {
                 res.status(400).json({ message: "ID harus berupa angka" });
+                return;
+            }
+
+            if (!(await assertCanManageRoles(req, res, userId, roleId))) {
                 return;
             }
 

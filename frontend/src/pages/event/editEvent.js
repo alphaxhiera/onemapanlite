@@ -133,14 +133,19 @@ export default function EditEvent() {
 
   const handleAreaChange = useCallback((e) => {
     const area = e.target.value;
+    const isExternalNonFotang = formData.category === "External" && !formData.is_in_fotang;
     setFormData(prev => ({
       ...prev,
       area,
+      // The external (non-fotang) form reads `external_area`, not `area`;
+      // keep both in sync or the previous wilayah is submitted.
+      external_area: isExternalNonFotang ? area : prev.external_area,
       provinceId: "",
       cityId: "",
-      fotangId: ""
+      fotangId: "",
+      ...(isExternalNonFotang ? { external_provinceId: "", external_cityId: "" } : {}),
     }));
-  }, [setFormData]);
+  }, [formData.category, formData.is_in_fotang, setFormData]);
 
   const handleProvinceChange = useCallback((e) => {
     const provinceId = e.target.value;
@@ -311,6 +316,10 @@ export default function EditEvent() {
           event_type: event.event_type || "Regular",
           description: event.description || "",
           is_recurring: !!event.is_recurring,
+          lunar_sui_ci_year: event.lunar_sui_ci_year || "",
+          lunar_month: event.lunar_month || "",
+          lunar_day: event.lunar_day || "",
+          eventLocationId: event.eventLocationId || event.eventLocation?.event_location_id || "",
           poster_s3_bucket_link: event.poster_s3_bucket_link || null,
         };
 

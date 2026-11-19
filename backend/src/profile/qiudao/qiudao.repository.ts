@@ -160,11 +160,11 @@ export const getQiudaosPaginated = async ({
     ];
 
     if (searchableFields.includes(field)) {
-      filters.push({ [field]: { contains: s, mode: "insensitive" } });
+      filters.push({ [field]: { contains: s } });
     } else if (field === "dian_chuan_shi.name") {
-      filters.push({ dian_chuan_shi: { name: { contains: s, mode: "insensitive" } } });
+      filters.push({ dian_chuan_shi: { name: { contains: s } } });
     } else if (field === "dian_chuan_shi.mandarin_name") {
-      filters.push({ dian_chuan_shi: { mandarin_name: { contains: s, mode: "insensitive" } } });
+      filters.push({ dian_chuan_shi: { mandarin_name: { contains: s } } });
     }
   });
 

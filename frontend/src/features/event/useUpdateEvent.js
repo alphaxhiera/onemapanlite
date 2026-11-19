@@ -11,6 +11,7 @@ export const useUpdateEvent = () => {
     return useMutation({
         mutationFn: ({ id, payload }) => updateEvent(id, payload),
         onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: ["events-final-v3"] });
         queryClient.invalidateQueries({ queryKey: ["fetch.events"] });
         },
         onError: (error) => {

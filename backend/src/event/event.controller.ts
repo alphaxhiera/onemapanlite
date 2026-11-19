@@ -17,6 +17,7 @@ import { saveImageBuffer } from "../utils/file-types";
 import { HttpError } from "../utils/http-error";
 import { uploadLimiter } from "../middleware/rate-limit";
 import { sendError } from "../utils/respond";
+import prisma from "../db";
 
 interface AuthRequest extends Request {
   user?: ExtendedJwtPayload;
@@ -25,6 +26,39 @@ interface AuthRequest extends Request {
 const router = Router();
 
 const uploadPath = path.join(__dirname, "../../public/uploads");
+
+const VALID_EVENT_TYPES = Object.values(EventType);
+const VALID_CATEGORIES = Object.values(EventCategory);
+
+const assertValidEnums = (category: unknown, eventType: unknown): void => {
+  if (category !== undefined && category !== null && !VALID_CATEGORIES.includes(category as EventCategory)) {
+    throw { statusCode: 400, message: "category tidak valid" };
+  }
+  if (eventType !== undefined && eventType !== null && !VALID_EVENT_TYPES.includes(eventType as EventType)) {
+    throw { statusCode: 400, message: "event_type tidak valid" };
+  }
+};
+
+const getFotangArea = async (fotangId: number): Promise<Korwil> => {
+  const fotang = await prisma.fotang.findUnique({
+    where: { fotang_id: fotangId },
+    select: { area: true },
+  });
+  if (!fotang) throw { statusCode: 404, message: "Vihara tidak ditemukan" };
+  return fotang.area;
+};
+
+/**
+ * Non-national users may only touch events in their own wilayah. The area is
+ * derived from the event location (fotang or manual event location) rather than
+ * trusted from the request body.
+ */
+const assertAreaAllowed = (req: AuthRequest, area: Korwil | null | undefined): void => {
+  if (!area || isNationalAccessRole(req.user?.role)) return;
+  if (area !== req.user?.area) {
+    throw { statusCode: 403, message: "Tidak boleh mengakses kegiatan di luar wilayah Anda" };
+  }
+};
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -165,21 +199,36 @@ router.post("/", authenticateJWT, async (req: AuthRequest, res: Response) => {
       occurrences,
     } = req.body;
 
+    assertValidEnums(category, event_type);
+
     if (!event_name) throw { message: "event_name required", statusCode: 400 };
+    if (!category) throw { message: "category required", statusCode: 400 };
+    if (!event_type) throw { message: "event_type required", statusCode: 400 };
     if (!occurrences || !Array.isArray(occurrences) || occurrences.length === 0)
       throw { message: "At least one occurrence required", statusCode: 400 };
 
-    if (is_in_fotang && !fotangId) throw { message: "fotangId required", statusCode: 400 };
-    if (!is_in_fotang && (!cityId || !location_name || !area))
-      throw { message: "cityId, location_name, area required", statusCode: 400 };
+    const inFotang = is_in_fotang ?? true;
+    const fotangIdNum = fotangId !== undefined && fotangId !== null && fotangId !== ""
+      ? parseInt(fotangId)
+      : undefined;
+    const cityIdNum = cityId !== undefined && cityId !== null && cityId !== ""
+      ? parseInt(cityId)
+      : undefined;
 
-    if (area) {
+    if (inFotang) {
+      if (!fotangIdNum || isNaN(fotangIdNum)) throw { message: "fotangId required", statusCode: 400 };
+      // The fotang decides the wilayah, so a user cannot create an event in
+      // another wilayah by simply posting a foreign fotangId.
+      assertAreaAllowed(req, await getFotangArea(fotangIdNum));
+    } else {
+      if (!cityIdNum || isNaN(cityIdNum) || !location_name || !area)
+        throw { message: "cityId, location_name, area required", statusCode: 400 };
+
       const validAreas = ["Korwil_1", "Korwil_2", "Korwil_3", "Korwil_4", "Korwil_5", "Korwil_6"];
       if (!validAreas.includes(area))
         throw { message: "Area tidak valid", statusCode: 400 };
 
-      if (!isNationalAccessRole(req.user?.role) && area !== req.user!.area)
-        throw { message: "Tidak boleh buat event di luar wilayah Anda", statusCode: 403 };
+      assertAreaAllowed(req, area as Korwil);
     }
 
     const event = await createNewEvent({
@@ -187,9 +236,9 @@ router.post("/", authenticateJWT, async (req: AuthRequest, res: Response) => {
       event_type,
       event_name,
       event_mandarin_name: event_mandarin_name ?? null,
-      is_in_fotang: is_in_fotang ?? true,
-      fotangId: fotangId ? parseInt(fotangId) : undefined,
-      cityId: cityId ? parseInt(cityId) : undefined,
+      is_in_fotang: inFotang,
+      fotangId: fotangIdNum,
+      cityId: cityIdNum,
       location_name,
       street: street ?? null,
       postal_code: postal_code ?? null,
@@ -245,41 +294,62 @@ router.patch("/:id", authenticateJWT, async (req: AuthRequest, res: Response) =>
       eventLocationId,
     } = req.body;
 
-    if (area !== undefined) {
-      const validAreas = ["Korwil_1", "Korwil_2", "Korwil_3", "Korwil_4", "Korwil_5", "Korwil_6"];
-      if (area !== null && !validAreas.includes(area))
-        throw { message: "Area tidak valid", statusCode: 400 };
+    assertValidEnums(category, event_type);
 
-      if (!isNationalAccessRole(req.user?.role) && area !== null && area !== req.user!.area)
-        throw { message: "Tidak boleh ubah ke wilayah lain", statusCode: 403 };
+    // Users may only edit events that currently belong to their wilayah.
+    assertAreaAllowed(req, event.fotang?.area ?? event.eventLocation?.area ?? null);
+
+    const validAreas = ["Korwil_1", "Korwil_2", "Korwil_3", "Korwil_4", "Korwil_5", "Korwil_6"];
+    const nextInFotang = is_in_fotang !== undefined ? Boolean(is_in_fotang) : Boolean(event.is_in_fotang);
+    const fotangIdNum =
+      fotangId !== undefined && fotangId !== null && fotangId !== "" ? parseInt(fotangId) : undefined;
+    const cityIdNum =
+      cityId !== undefined && cityId !== null && cityId !== "" ? parseInt(cityId) : undefined;
+
+    if (area !== undefined && area !== null) {
+      if (!validAreas.includes(area)) throw { message: "Area tidak valid", statusCode: 400 };
+    }
+
+    // Also verify the destination, otherwise a wilayah user could move an event
+    // into (or out of) another wilayah.
+    if (nextInFotang) {
+      const targetFotangId = fotangIdNum ?? event.fotangId ?? undefined;
+      if (targetFotangId) assertAreaAllowed(req, await getFotangArea(targetFotangId));
+    } else {
+      const targetArea = (area ?? event.eventLocation?.area) as Korwil | undefined;
+      if (!targetArea) throw { message: "area required", statusCode: 400 };
+      assertAreaAllowed(req, targetArea);
     }
 
     const updated = await updateExistingEvent(eventId, {
-      category: category ? (category as EventCategory) : undefined,
-      event_type: event_type ? (event_type as EventType) : undefined,
+      category: category !== undefined ? (category as EventCategory) : undefined,
+      event_type: event_type !== undefined ? (event_type as EventType) : undefined,
       event_name,
-      event_mandarin_name: event_mandarin_name ?? undefined,
+      event_mandarin_name: event_mandarin_name !== undefined ? event_mandarin_name : undefined,
       is_in_fotang: is_in_fotang !== undefined ? is_in_fotang : undefined,
-      fotangId: fotangId ? parseInt(fotangId) : undefined,
-      cityId: cityId ? parseInt(cityId) : undefined,
+      fotangId: fotangIdNum,
+      cityId: cityIdNum,
       location_name,
-      street: street ?? undefined,
-      postal_code: postal_code ?? undefined,
+      street: street !== undefined ? street : undefined,
+      postal_code: postal_code !== undefined ? postal_code : undefined,
       area: area !== undefined ? (area as Korwil) : undefined,
       institutionId: institutionId ? parseInt(institutionId) : undefined,
-      lunar_sui_ci_year: lunar_sui_ci_year ?? undefined,
-      lunar_month: lunar_month ?? undefined,
-      lunar_day: lunar_day ?? undefined,
+      lunar_sui_ci_year: lunar_sui_ci_year !== undefined ? lunar_sui_ci_year : undefined,
+      lunar_month: lunar_month !== undefined ? lunar_month : undefined,
+      lunar_day: lunar_day !== undefined ? lunar_day : undefined,
       is_recurring: is_recurring !== undefined ? is_recurring : undefined,
-      description: description ?? undefined,
-      poster_s3_bucket_link: poster_s3_bucket_link ?? undefined,
+      description: description !== undefined ? description : undefined,
+      poster_s3_bucket_link: poster_s3_bucket_link !== undefined ? poster_s3_bucket_link : undefined,
       occurrences: occurrences
         ? occurrences.map((o: any) => ({
             greg_occur_date: new Date(o.greg_occur_date),
             greg_end_date: o.greg_end_date ? new Date(o.greg_end_date) : null,
           }))
         : undefined,
-      eventLocationId: eventLocationId ? parseInt(eventLocationId) : undefined,
+      eventLocationId:
+        eventLocationId !== undefined && eventLocationId !== null && eventLocationId !== ""
+          ? parseInt(eventLocationId)
+          : undefined,
     });
 
     res.status(200).json(updated);

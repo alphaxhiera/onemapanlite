@@ -9,6 +9,7 @@ import {
 import { Prisma } from "@prisma/client";
 import { fetchCities, fetchDistricts, fetchLocalities, fetchProvinces } from "../profile/location/location.service";
 import { authenticateJWT } from "../middleware/authentication";
+import { requireNationalAccess } from "../middleware/require-national";
 import { sendError, sendBadRequest } from "../utils/respond";
 
 const router = Router();
@@ -89,7 +90,7 @@ router.get("/:id", async (req, res) => {
     })();
 });
 
-router.post("/", async (req: Request, res: Response) => {
+router.post("/", requireNationalAccess, async (req: Request, res: Response) => {
     try {
         const newFotang = await createFotang(req.body as Prisma.FotangCreateInput);
         res.status(201).json(newFotang);
@@ -99,7 +100,7 @@ router.post("/", async (req: Request, res: Response) => {
     }
 });
 
-router.patch("/:id", async (req: Request, res: Response) => {
+router.patch("/:id", requireNationalAccess, async (req: Request, res: Response) => {
     try {
         const id = parseInt(req.params.id);
         const updatedFotang = await updateFotang(id, req.body as Prisma.FotangUpdateInput);
@@ -113,7 +114,7 @@ router.patch("/:id", async (req: Request, res: Response) => {
     }
 });
 
-router.delete("/:id", async (req: Request, res: Response) => {
+router.delete("/:id", requireNationalAccess, async (req: Request, res: Response) => {
     try {
         const id = parseInt(req.params.id);
         await deleteFotang(id);

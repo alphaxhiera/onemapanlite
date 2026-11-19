@@ -8,7 +8,7 @@ const router = express.Router();
 router.get(
     "/qiudao",
     authenticateJWT,
-    authorize({ feature: "qiudao", action: "read" }),
+    authorize({ feature: "qiudao", action: "read", scope: "nasional" }),
     async (req: Request, res: Response) => {
         try {
             const workbookBuffer = await generateQiudaoExcel();
@@ -33,7 +33,7 @@ router.get(
 router.get(
     "/umat",
     authenticateJWT,
-    authorize({ feature: "umat", action: "read" }),
+    authorize({ feature: "umat", action: "read", scope: "nasional" }),
     async (req: Request, res: Response) => {
         try {
             const workbookBuffer = await generateUserExcel();
